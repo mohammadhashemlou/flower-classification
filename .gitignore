@@ -64,3 +64,11 @@ desktop.ini
 *.log
 *.so*
 *.so
+
+# Training logs
+training_*.log
+*.log
+
+# Model checkpoints
+models/**/*.keras
+models/**/*.weights.h5

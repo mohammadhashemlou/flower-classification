@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers  # type: ignore
 
 from pathlib import Path
 from typing import Tuple
@@ -47,19 +49,21 @@ def load_and_preprocess_image(
 # ── Augmentation ─────────────────────────────────────────────────────
 
 
-def build_augmentation_layer(img_height: int = 224, img_width: int = 224) -> tf.keras.Model:
+def build_augmentation_layer(img_height: int = 224, img_width: int = 224) -> keras.Model:
     """Create a Keras data augmentation model for training.
 
-    Includes horizontal flip, rotation, zoom, contrast, and brightness shifts.
+    This is meant to be placed at the START of a model (not in the data pipeline),
+    so it receives batched input of shape (batch, H, W, 3).
+
+    Includes horizontal flip, rotation, zoom, and contrast shifts.
     """
-    return tf.keras.Sequential(
+    return keras.Sequential(
         [
-            tf.keras.layers.Input(shape=(img_height, img_width, 3)),
-            tf.keras.layers.RandomFlip("horizontal"),
-            tf.keras.layers.RandomRotation(0.1),
-            tf.keras.layers.RandomZoom(0.15),
-            tf.keras.layers.RandomContrast(0.15),
-            tf.keras.layers.RandomBrightness(0.1),
+            layers.Input(shape=(img_height, img_width, 3)),
+            layers.RandomFlip("horizontal"),
+            layers.RandomRotation(0.1),
+            layers.RandomZoom(0.15),
+            layers.RandomContrast(0.15),
         ],
         name="data_augmentation",
     )
@@ -114,14 +118,9 @@ def create_data_pipeline(
 
     dataset = dataset.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
 
-    # Apply augmentation as a second map stage (keeps decode fast)
-    if augment:
-        aug_layer = build_augmentation_layer(cfg.img_height, cfg.img_width)
-
-        def _augment(image, label):
-            return aug_layer(image, training=True), label
-
-        dataset = dataset.map(_augment, num_parallel_calls=tf.data.AUTOTUNE)
+    # NOTE: Augmentation is applied INSIDE the model (via build_augmentation_layer),
+    # not in the data pipeline. This avoids shape issues with tf.data.Dataset.map
+    # and is the recommended Keras approach.
 
     dataset = dataset.batch(cfg.batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)

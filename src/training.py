@@ -80,13 +80,56 @@ def build_cosine_lr_schedule(
     total_steps = cfg.epochs * steps_per_epoch
     warmup_steps = warmup_epochs * steps_per_epoch
 
-    return keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=cfg.initial_lr,
-        decay_steps=total_steps - warmup_steps,
-        alpha=cfg.min_lr / cfg.initial_lr,
-        warmup_target=cfg.initial_lr,
-        warmup_steps=warmup_steps,
-    )
+    # CosineDecay with warmup — falls back gracefully if warmup params
+    # are not supported (TF < 2.14)
+    try:
+        return keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=cfg.initial_lr,
+            decay_steps=total_steps - warmup_steps,
+            alpha=cfg.min_lr / cfg.initial_lr,
+            warmup_target=cfg.initial_lr,
+            warmup_steps=warmup_steps,
+        )
+    except TypeError:
+        # TF < 2.14: no warmup support — use plain cosine decay
+        return keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=cfg.initial_lr,
+            decay_steps=total_steps,
+            alpha=cfg.min_lr / cfg.initial_lr,
+        )
+
+
+def sparse_ce_with_label_smoothing(
+    num_classes: int,
+    smoothing: float = 0.1,
+):
+    """Sparse categorical cross-entropy with label smoothing.
+
+    Keras 2.10's built-in loss does not expose `label_smoothing`, so we
+    implement it explicitly. Smoothing prevents the model from becoming
+    overconfident, which measurably reduces overfitting on small datasets.
+
+    Args:
+        num_classes: Total number of classes.
+        smoothing: Smoothing factor in [0, 1). 0 disables smoothing.
+
+    Returns:
+        A loss function with signature (y_true, y_pred).
+    """
+
+    def loss_fn(y_true, y_pred):
+        y_true = tf.cast(tf.reshape(y_true, [-1]), tf.int32)
+        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0)
+
+        y_one_hot = tf.one_hot(y_true, num_classes)
+        y_smooth = y_one_hot * (1.0 - smoothing) + smoothing / num_classes
+
+        return tf.reduce_mean(
+            -tf.reduce_sum(y_smooth * tf.math.log(y_pred), axis=-1)
+        )
+
+    loss_fn.__name__ = f"sparse_ce_smooth_{smoothing}"
+    return loss_fn
 
 
 def compile_model(
@@ -105,11 +148,14 @@ def compile_model(
     """
     lr = learning_rate if learning_rate is not None else cfg.initial_lr
 
+    if label_smoothing > 0:
+        loss = sparse_ce_with_label_smoothing(cfg.num_classes, label_smoothing)
+    else:
+        loss = keras.losses.SparseCategoricalCrossentropy()
+
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=lr),
-        loss=keras.losses.SparseCategoricalCrossentropy(
-            label_smoothing=label_smoothing,
-        ),
+        loss=loss,
         metrics=[
             keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
             keras.metrics.SparseTopKCategoricalAccuracy(name="top_5_accuracy"),
