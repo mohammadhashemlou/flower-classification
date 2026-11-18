@@ -29,6 +29,7 @@ from src.evaluation import (  # noqa: E402
     evaluate_model,
     plot_confusion_matrix,
 )
+from src.training import compile_model  # noqa: E402
 from src.utils import set_global_seed  # noqa: E402
 
 
@@ -73,6 +74,11 @@ def main() -> None:
     # compile=False: we only run inference, and skipping compilation avoids
     # needing the exact training-time loss/optimizer to be deserializable.
     model = keras.models.load_model(str(ckpt), compile=False)
+
+    # A compile=False model has no loss/metrics attached, so .evaluate()
+    # would raise. Recompile with plain cross-entropy — we only need the
+    # accuracy and top-5 metrics here, not the training-time loss.
+    compile_model(model, cfg, learning_rate=cfg.initial_lr, label_smoothing=0.0)
 
     print(f"Building '{args.split}' pipeline...")
     ds = create_data_pipeline(cfg, split=args.split)

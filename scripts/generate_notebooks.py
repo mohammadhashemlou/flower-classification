@@ -6,12 +6,31 @@ NOTEBOOKS_DIR = Path(__file__).resolve().parent.parent / "notebooks"
 NOTEBOOKS_DIR.mkdir(exist_ok=True)
 
 
+def _source_lines(text):
+    """Split text into nbformat-compliant source lines.
+
+    Each element must keep its trailing newline (the last one excepted),
+    otherwise Jupyter joins the list without separators and the whole cell
+    renders as a single unreadable line.
+    """
+    lines = text.splitlines(keepends=True)
+    if lines:
+        lines[-1] = lines[-1].rstrip("\n")
+    return lines
+
+
 def md(text):
-    return {"cell_type": "markdown", "metadata": {}, "source": text.split("\n")}
+    return {"cell_type": "markdown", "metadata": {}, "source": _source_lines(text)}
 
 
 def code(text):
-    return {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": text.split("\n")}
+    return {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": _source_lines(text),
+    }
 
 
 def make_notebook(cells, filename):
@@ -187,7 +206,7 @@ make_notebook(
             "    train_ds,\n"
             "    val_ds,\n"
             "    cfg,\n"
-            "    experiment_name='baseline_cnn',\n"
+            "    experiment_name='01_baseline_cnn',\n"
             "    class_weight=class_weights,\n"
             ")"
         ),
@@ -195,7 +214,7 @@ make_notebook(
             "from src.utils import plot_training_history\n"
             "\n"
             "plot_training_history(\n"
-            "    cfg.experiment_dir('baseline_cnn') / 'history.csv',\n"
+            "    cfg.experiment_dir('01_baseline_cnn') / 'history.csv',\n"
             "    title='Baseline CNN',\n"
             ")"
         ),
@@ -234,7 +253,7 @@ make_notebook(
             "    train_ds,\n"
             "    val_ds,\n"
             "    cfg,\n"
-            "    experiment_name='residual_cnn',\n"
+            "    experiment_name='02_residual_cnn',\n"
             "    class_weight=class_weights,\n"
             ")"
         ),
@@ -242,7 +261,7 @@ make_notebook(
             "from src.utils import plot_training_history\n"
             "\n"
             "plot_training_history(\n"
-            "    cfg.experiment_dir('residual_cnn') / 'history.csv',\n"
+            "    cfg.experiment_dir('02_residual_cnn') / 'history.csv',\n"
             "    title='Residual CNN',\n"
             ")"
         ),
@@ -286,7 +305,7 @@ make_notebook(
             "    train_ds,\n"
             "    val_ds,\n"
             "    cfg,\n"
-            "    experiment_name='transfer_phase1',\n"
+            "    experiment_name='03_efficientnet_frozen',\n"
             "    class_weight=class_weights,\n"
             ")"
         ),
@@ -305,7 +324,7 @@ make_notebook(
             "    train_ds,\n"
             "    val_ds,\n"
             "    cfg,\n"
-            "    experiment_name='transfer_phase2',\n"
+            "    experiment_name='04_efficientnet_finetuned',\n"
             "    class_weight=class_weights,\n"
             ")"
         ),
@@ -313,7 +332,7 @@ make_notebook(
             "from src.utils import plot_training_history\n"
             "\n"
             "plot_training_history(\n"
-            "    cfg.experiment_dir('transfer_phase2') / 'history.csv',\n"
+            "    cfg.experiment_dir('04_efficientnet_finetuned') / 'history.csv',\n"
             "    title='Transfer Learning - Fine-Tuning',\n"
             ")"
         ),
@@ -338,10 +357,10 @@ make_notebook(
             "cfg = Config()\n"
             "\n"
             "experiments = {\n"
-            "    'Baseline CNN': cfg.experiment_dir('baseline_cnn') / 'history.csv',\n"
-            "    'Residual CNN': cfg.experiment_dir('residual_cnn') / 'history.csv',\n"
-            "    'Transfer (Phase 1)': cfg.experiment_dir('transfer_phase1') / 'history.csv',\n"
-            "    'Transfer (Phase 2)': cfg.experiment_dir('transfer_phase2') / 'history.csv',\n"
+            "    'Baseline CNN': cfg.experiment_dir('01_baseline_cnn') / 'history.csv',\n"
+            "    'Residual CNN': cfg.experiment_dir('02_residual_cnn') / 'history.csv',\n"
+            "    'Transfer (Phase 1)': cfg.experiment_dir('03_efficientnet_frozen') / 'history.csv',\n"
+            "    'Transfer (Phase 2)': cfg.experiment_dir('04_efficientnet_finetuned') / 'history.csv',\n"
             "}\n"
             "\n"
             "results = []\n"

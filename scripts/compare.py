@@ -24,13 +24,12 @@ from src.config import Config  # noqa: E402
 
 # Human-readable labels for experiment directories
 PRETTY_NAMES = {
-    "baseline": "Baseline CNN",
-    "experiment_02_augmentation": "CNN + Augmentation",
-    "experiment_03_residual_cnn": "Residual CNN",
-    "experiment_04_strong_augmentation": "Residual CNN + Strong Aug",
-    "experiment_05_lr_tuning": "Residual CNN + LR Tuning",
-    "transfer_efficientnetb0_frozen": "EfficientNetB0 (frozen)",
-    "transfer_efficientnetb0_finetune": "EfficientNetB0 (fine-tuned)",
+    "01_baseline_cnn": "Baseline CNN (from scratch)",
+    "02_residual_cnn": "Residual CNN (from scratch)",
+    "03_efficientnet_frozen": "EfficientNetB0 frozen",
+    "04_efficientnet_finetuned": "EfficientNetB0 fine-tuned",
+    "05_efficientnet_frozen_x2": "EfficientNetB0 frozen (train+val)",
+    "06_efficientnet_finetuned_x2": "EfficientNetB0 fine-tuned (train+val)",
 }
 
 
