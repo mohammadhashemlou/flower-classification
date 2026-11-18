@@ -132,6 +132,24 @@ def sparse_ce_with_label_smoothing(
     return loss_fn
 
 
+def _build_loss(cfg: Config, label_smoothing: float):
+    """Return a sparse categorical cross-entropy loss.
+
+    Prefers Keras' built-in loss (which supports `label_smoothing` in
+    Keras 3 and later). Falls back to a hand-rolled implementation on
+    older Keras versions where the keyword does not exist.
+    """
+    if label_smoothing <= 0:
+        return keras.losses.SparseCategoricalCrossentropy()
+
+    try:
+        return keras.losses.SparseCategoricalCrossentropy(
+            label_smoothing=label_smoothing
+        )
+    except TypeError:
+        return sparse_ce_with_label_smoothing(cfg.num_classes, label_smoothing)
+
+
 def compile_model(
     model: keras.Model,
     cfg: Config,
@@ -148,14 +166,9 @@ def compile_model(
     """
     lr = learning_rate if learning_rate is not None else cfg.initial_lr
 
-    if label_smoothing > 0:
-        loss = sparse_ce_with_label_smoothing(cfg.num_classes, label_smoothing)
-    else:
-        loss = keras.losses.SparseCategoricalCrossentropy()
-
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=lr),
-        loss=loss,
+        loss=_build_loss(cfg, label_smoothing),
         metrics=[
             keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
             keras.metrics.SparseTopKCategoricalAccuracy(name="top_5_accuracy"),

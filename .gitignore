@@ -72,3 +72,6 @@ training_*.log
 # Model checkpoints
 models/**/*.keras
 models/**/*.weights.h5
+
+# Model artifacts & training output (regenerate with scripts/train.py)
+models/

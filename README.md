@@ -87,6 +87,26 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+### GPU setup (CUDA 12)
+
+Training on GPU is strongly recommended — the transfer-learning runs are
+roughly **20–30× faster** than on CPU.
+
+1. Install a CUDA 12.x toolkit and a recent NVIDIA driver.
+2. Install cuDNN 9 (bundled by `requirements.txt`, or manually).
+3. Verify the setup:
+
+```bash
+python scripts/gpu_env.py
+```
+
+`scripts/gpu_env.py` registers the CUDA/cuDNN DLL directories for the current
+process, so TensorFlow finds them even when they are not on `PATH`.
+`scripts/train.py` calls it automatically before importing TensorFlow.
+
+> If TensorFlow still reports no GPU, check that the CUDA major version matches
+> the one TF was built against (`tensorflow 2.18` → CUDA 12.5, cuDNN 9.3).
+
 ### Dataset
 
 Download [Oxford Flowers 102](https://www.robots.ox.ac.uk/~vgg/data/flowers/102/) and lay it out as:

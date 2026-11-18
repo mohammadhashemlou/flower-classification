@@ -6,6 +6,7 @@ import os
 import random
 import numpy as np
 import tensorflow as tf
+from tensorflow import keras
 
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,45 @@ def set_global_seed(seed: int = 42) -> None:
     random.seed(seed)
     np.random.seed(seed)
     tf.random.set_seed(seed)
+    try:
+        keras.utils.set_random_seed(seed)
+    except Exception:
+        pass
+
+
+def configure_gpu(memory_growth: bool = True) -> list:
+    """Enable GPU memory growth and report available devices.
+
+    Without memory growth TensorFlow grabs the entire GPU memory on first
+    use, which makes the machine unusable and blocks other processes.
+    Enabling growth allocates on demand instead.
+
+    Args:
+        memory_growth: Whether to enable per-device memory growth.
+
+    Returns:
+        List of physical GPU devices TensorFlow can see.
+    """
+    gpus = tf.config.list_physical_devices("GPU")
+
+    if not gpus:
+        print("⚠  No GPU detected — training will run on CPU.")
+        return gpus
+
+    if memory_growth:
+        for gpu in gpus:
+            try:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            except RuntimeError as exc:
+                # Already initialised — growth must be set before first use
+                print(f"  (memory growth not applied: {exc})")
+
+    for gpu in gpus:
+        details = tf.config.experimental.get_device_details(gpu)
+        name = details.get("device_name", gpu.name)
+        print(f"✓ GPU available: {name}")
+
+    return gpus
 
 
 def load_oxford_flowers_metadata(dataset_dir: Path):

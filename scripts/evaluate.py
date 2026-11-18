@@ -14,6 +14,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from gpu_env import setup_cuda_dlls  # noqa: E402
+
+setup_cuda_dlls(verbose=False)
 
 from tensorflow import keras  # noqa: E402
 

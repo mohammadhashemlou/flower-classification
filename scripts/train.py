@@ -25,6 +25,12 @@ from pathlib import Path
 # Make the project root importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Register CUDA DLL directories BEFORE TensorFlow is imported
+from gpu_env import setup_cuda_dlls  # noqa: E402
+
+setup_cuda_dlls(verbose=False)
 
 import tensorflow as tf  # noqa: E402
 from tensorflow import keras  # noqa: E402
@@ -39,7 +45,7 @@ from src.models.transfer_learning import (  # noqa: E402
     unfreeze_backbone,
 )
 from src.training import compile_model, train_model  # noqa: E402
-from src.utils import plot_training_history, set_global_seed  # noqa: E402
+from src.utils import configure_gpu, plot_training_history, set_global_seed  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,27 +113,40 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_model(args: argparse.Namespace, cfg: Config) -> keras.Model:
-    """Instantiate the requested architecture."""
+    """Instantiate the requested architecture.
+
+    When ``--init-from`` points at a saved ``.keras`` model, the whole model
+    (architecture + weights) is restored instead of re-creating it and
+    copying weights. This is required for fine-tuning: the restored model
+    already contains the trained head, so unfreezing its backbone continues
+    from the phase-1 optimum rather than from ImageNet weights.
+    """
     if args.model == "baseline":
         return build_baseline_cnn(cfg)
 
     if args.model == "residual":
         return build_residual_cnn(cfg, augment=not args.no_augment)
 
-    # transfer
+    # ── transfer ────────────────────────────────────────────────────
+    if args.init_from:
+        init_path = Path(args.init_from)
+        if not init_path.exists():
+            raise FileNotFoundError(f"--init-from path not found: {init_path}")
+
+        print(f"Restoring model from: {init_path}")
+        model = keras.models.load_model(str(init_path), compile=False)
+
+        if args.fine_tune:
+            unfreeze_backbone(model, num_layers_to_unfreeze=args.unfreeze_layers)
+
+        return model
+
     model = build_transfer_model(
         cfg,
         backbone=args.backbone,
         freeze_backbone=not args.fine_tune,
         augment=not args.no_augment,
     )
-
-    if args.init_from:
-        init_path = Path(args.init_from)
-        if not init_path.exists():
-            raise FileNotFoundError(f"--init-from path not found: {init_path}")
-        print(f"Loading initial weights from: {init_path}")
-        model.load_weights(str(init_path))
 
     if args.fine_tune:
         unfreeze_backbone(model, num_layers_to_unfreeze=args.unfreeze_layers)
@@ -145,12 +164,14 @@ def main() -> None:
         cfg.initial_lr = args.lr
 
     set_global_seed(cfg.seed)
+    gpus = configure_gpu()
 
     print("=" * 64)
     print("  Flower Classification — Training")
     print("=" * 64)
     print(f"  TensorFlow : {tf.__version__}")
-    print(f"  GPUs       : {tf.config.list_physical_devices('GPU')}")
+    print(f"  Keras      : {keras.__version__}")
+    print(f"  GPUs       : {len(gpus)}")
     print(f"  Model      : {args.model}")
     if args.model == "transfer":
         print(f"  Backbone   : {args.backbone}")

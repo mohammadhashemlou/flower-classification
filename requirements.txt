@@ -1,9 +1,20 @@
-tensorflow>=2.15,<2.17
-numpy>=1.24
+# Core
+tensorflow>=2.18,<2.19
+numpy>=1.26,<2.2
+scipy>=1.10
+
+# Data & plotting
 pandas>=2.0
 matplotlib>=3.7
 seaborn>=0.12
-scipy>=1.10
 Pillow>=10.0
 scikit-learn>=1.3
+
+# Notebooks
 jupyter>=1.0
+ipykernel>=6.0
+
+# GPU support (CUDA 12)
+# TF 2.18 needs cuDNN 9 at runtime. A system CUDA 12.x toolkit supplies the
+# rest (cudart, cublas, cufft, cusparse, cusolver). Install cuDNN 9 via pip:
+nvidia-cudnn-cu12==9.3.0.75

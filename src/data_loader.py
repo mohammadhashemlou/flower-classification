@@ -46,6 +46,37 @@ def load_and_preprocess_image(
     return image, label
 
 
+def decode_image_uint8(
+    image_path: tf.Tensor,
+    label: tf.Tensor,
+    img_height: int = 224,
+    img_width: int = 224,
+) -> Tuple[tf.Tensor, tf.Tensor]:
+    """Decode + resize an image but keep it as uint8.
+
+    Keeping decoded images in uint8 uses 4x less memory than float32, which
+    makes it practical to cache the whole train/val split in RAM. JPEG
+    decoding is by far the most expensive part of the input pipeline, so
+    caching it typically gives a 3-5x speedup on small datasets like
+    Oxford Flowers 102 (~1k training images).
+
+    Args:
+        image_path: String tensor with the file path.
+        label: Integer tensor with the class index (0-based).
+        img_height: Target height in pixels.
+        img_width: Target width in pixels.
+
+    Returns:
+        (image, label) tuple — image is uint8, shape (H, W, 3).
+    """
+    image = tf.io.read_file(image_path)
+    image = tf.io.decode_jpeg(image, channels=3)
+    image = tf.image.resize_with_pad(image, img_height, img_width)
+    label = tf.cast(label, tf.int32)
+    return image, label
+
+
+
 # ── Augmentation ─────────────────────────────────────────────────────
 
 
@@ -76,13 +107,28 @@ def create_data_pipeline(
     cfg: Config,
     split: str = "train",
     augment: bool = False,
+    cache: bool = True,
 ) -> tf.data.Dataset:
     """Build a tf.data.Dataset for one of the train / val / test splits.
+
+    Pipeline stages, in order:
+
+    1. ``read_file`` + ``decode_jpeg`` + ``resize`` → uint8  (expensive)
+    2. ``cache()`` in RAM — done once, reused for every epoch
+    3. ``shuffle()`` (train only) — reshuffles every epoch, after the cache
+    4. cast to float32 and scale to [0, 1]
+    5. ``batch()`` + ``prefetch()``
+
+    Caching *before* the shuffle is deliberate: it keeps per-epoch
+    reshuffling while avoiding repeated JPEG decodes.
 
     Args:
         cfg: Project Config instance.
         split: One of "train", "val", "test".
-        augment: Whether to apply on-the-fly data augmentation (training only).
+        augment: Reserved for future pipeline-level augmentation. Currently
+            augmentation is applied inside the model, so this is unused.
+        cache: Cache the decoded uint8 images in RAM. Disable for the full
+            test split if memory is tight.
 
     Returns:
         A batched, prefetched tf.data.Dataset yielding (images, labels).
@@ -105,6 +151,17 @@ def create_data_pipeline(
 
     dataset = tf.data.Dataset.from_tensor_slices((paths, y.astype(np.int32)))
 
+    # Stage 1 — expensive decode/resize, kept in uint8
+    dataset = dataset.map(
+        lambda p, l: decode_image_uint8(p, l, cfg.img_height, cfg.img_width),
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
+
+    # Stage 2 — cache decoded images in RAM (no-op on later epochs)
+    if cache:
+        dataset = dataset.cache()
+
+    # Stage 3 — shuffle after caching so each epoch sees a new order
     if split == "train":
         dataset = dataset.shuffle(
             buffer_size=len(paths),
@@ -112,15 +169,13 @@ def create_data_pipeline(
             reshuffle_each_iteration=True,
         )
 
-    # Map preprocessing
-    def _preprocess(path, label):
-        return load_and_preprocess_image(path, label, cfg.img_height, cfg.img_width)
-
-    dataset = dataset.map(_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-
-    # NOTE: Augmentation is applied INSIDE the model (via build_augmentation_layer),
-    # not in the data pipeline. This avoids shape issues with tf.data.Dataset.map
-    # and is the recommended Keras approach.
+    # Stage 4 — convert to float32 in [0, 1]
+    # NOTE: Augmentation is applied INSIDE the model (build_augmentation_layer),
+    # so the cached pixels stay deterministic and reusable across epochs.
+    dataset = dataset.map(
+        lambda image, label: (tf.cast(image, tf.float32) / 255.0, label),
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
 
     dataset = dataset.batch(cfg.batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
@@ -132,10 +187,15 @@ def create_all_pipelines(
     cfg: Config,
     augment_train: bool = True,
 ) -> Tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
-    """Convenience: return (train_ds, val_ds, test_ds) in one call."""
-    train_ds = create_data_pipeline(cfg, split="train", augment=augment_train)
-    val_ds = create_data_pipeline(cfg, split="val", augment=False)
-    test_ds = create_data_pipeline(cfg, split="test", augment=False)
+    """Convenience: return (train_ds, val_ds, test_ds) in one call.
+
+    Train and val are cached in RAM (small splits, read many times).
+    The test split is *not* cached — it holds ~6k images and is only
+    iterated once, so caching it would waste memory for no gain.
+    """
+    train_ds = create_data_pipeline(cfg, split="train", augment=augment_train, cache=True)
+    val_ds = create_data_pipeline(cfg, split="val", augment=False, cache=True)
+    test_ds = create_data_pipeline(cfg, split="test", augment=False, cache=False)
     return train_ds, val_ds, test_ds
 
 
