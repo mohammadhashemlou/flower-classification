@@ -1,11 +1,10 @@
-"""Configure CUDA DLL search paths on Windows before TensorFlow is imported.
+"""Register CUDA DLL search paths on Windows before TensorFlow is imported.
 
-TensorFlow on Windows loads CUDA/cuDNN DLLs at import time via the standard
-DLL search order. When CUDA lives in a non-default location, or when cuDNN
-is installed as a pip wheel (``nvidia-cudnn-cu12``), those directories are
-not on ``PATH`` and TF silently falls back to CPU.
+TensorFlow loads the CUDA and cuDNN DLLs at import time using the normal DLL
+search order. If CUDA sits in a non-default location, or cuDNN came from a pip
+wheel, those folders are not on PATH and TF quietly falls back to CPU.
 
-Import this module **before** ``import tensorflow``:
+Import this before tensorflow:
 
     from gpu_env import setup_cuda_dlls
     setup_cuda_dlls()
@@ -21,13 +20,13 @@ from pathlib import Path
 
 
 def _candidate_dirs() -> list[Path]:
-    """Return candidate directories that may contain CUDA/cuDNN DLLs."""
+    """Directories that may hold CUDA/cuDNN DLLs."""
     dirs: list[Path] = []
 
     if os.name != "nt":
         return dirs
 
-    # 1. System CUDA toolkit (CUDA_PATH, or the default install root)
+    # System CUDA toolkit, either from CUDA_PATH or the default install root
     cuda_roots = [
         Path(os.environ.get("CUDA_PATH", "")),
         Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"),
@@ -35,16 +34,15 @@ def _candidate_dirs() -> list[Path]:
     for root in cuda_roots:
         if not root or not root.exists():
             continue
-        # If the root itself is a versioned dir (e.g. ...\CUDA\v12.6), use it.
+        # The root may already be a versioned folder such as ...\CUDA\v12.6
         if (root / "bin").exists():
             dirs.append(root / "bin")
-        # Otherwise look at versioned children, newest first.
         for child in sorted(root.iterdir(), reverse=True):
             if child.is_dir() and (child / "bin").exists():
                 dirs.append(child / "bin")
 
-    # 2. pip-installed NVIDIA wheels (nvidia-*-cu11 / nvidia-*-cu12)
-    # Wheel layouts differ: some ship DLLs in ``bin/``, others in ``lib/x64/``.
+    # pip-installed NVIDIA wheels. Layouts differ: some put DLLs in bin/,
+    # others in lib/x64/.
     site_packages = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
     for sub in (
         "cudnn",
@@ -69,20 +67,13 @@ def _candidate_dirs() -> list[Path]:
 
 
 def setup_cuda_dlls(verbose: bool = True) -> list[str]:
-    """Register CUDA DLL directories for the current process.
-
-    Args:
-        verbose: Print each directory that was registered.
-
-    Returns:
-        The list of directories that were added (as strings).
-    """
+    """Register CUDA DLL directories for this process and return what was added."""
     added: list[str] = []
 
     for directory in _candidate_dirs():
         if not directory.exists():
             continue
-        # Verify it actually holds CUDA DLLs before registering
+        # Only register folders that actually contain CUDA DLLs
         has_dlls = any(
             f.name.startswith(
                 ("cudart", "cublas", "cudnn", "cufft", "cusparse", "cusolver", "curand")
@@ -97,11 +88,11 @@ def setup_cuda_dlls(verbose: bool = True) -> list[str]:
         except (AttributeError, OSError):
             pass
 
-        # Also prepend to PATH — some loaders still rely on it
+        # Also prepend to PATH, some loaders still look there
         os.environ["PATH"] = str(directory) + os.pathsep + os.environ.get("PATH", "")
         added.append(str(directory))
         if verbose:
-            print(f"  + CUDA DLL dir: {directory}")
+            print(f"  CUDA DLL dir: {directory}")
 
     if verbose and not added:
         print("  (no CUDA DLL directories found)")
@@ -120,4 +111,4 @@ if __name__ == "__main__":
         details = tf.config.experimental.get_device_details(gpu)
         print(f"  - {details.get('device_name', gpu.name)}")
     if not gpus:
-        print("\nNo GPU detected — check the CUDA/cuDNN versions above.")
+        print("\nNo GPU detected, check the CUDA/cuDNN versions above.")

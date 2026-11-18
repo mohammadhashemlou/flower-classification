@@ -1,4 +1,4 @@
-"""Evaluation utilities — metrics, confusion matrix, visualizations."""
+"""Metrics, confusion matrix and per-class reports."""
 
 from __future__ import annotations
 
@@ -14,15 +14,7 @@ def evaluate_model(
     model: keras.Model,
     test_ds: tf.data.Dataset,
 ) -> Tuple[float, float, float]:
-    """Evaluate a trained model on the test set.
-
-    Args:
-        model: A trained keras model.
-        test_ds: Test tf.data.Dataset.
-
-    Returns:
-        (test_loss, test_accuracy, test_top5_accuracy)
-    """
+    """Evaluate on the test set and return (loss, top1, top5)."""
     results = model.evaluate(test_ds, verbose=0)
     loss = results[0]
     acc = results[1]
@@ -39,15 +31,7 @@ def get_predictions(
     model: keras.Model,
     dataset: tf.data.Dataset,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Run inference on a dataset and return predictions + true labels.
-
-    Args:
-        model: Trained keras model.
-        dataset: tf.data.Dataset yielding (images, labels).
-
-    Returns:
-        (true_labels, predicted_labels) as 1-D numpy arrays.
-    """
+    """Return (true labels, predicted labels) for a dataset."""
     y_true = []
     y_pred = []
 
@@ -66,15 +50,7 @@ def plot_confusion_matrix(
     save_path: Optional[Path] = None,
     normalize: bool = True,
 ) -> None:
-    """Plot a confusion matrix for model predictions.
-
-    Args:
-        model: Trained keras model.
-        dataset: tf.data.Dataset yielding (images, labels).
-        num_classes: Number of classes.
-        save_path: Optional path to save the figure.
-        normalize: If True, normalize rows to show percentages.
-    """
+    """Save a confusion matrix for the model's predictions."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -111,13 +87,7 @@ def classification_report_csv(
     dataset: tf.data.Dataset,
     save_path: Path,
 ) -> None:
-    """Generate a per-class classification report and save as CSV.
-
-    Args:
-        model: Trained keras model.
-        dataset: tf.data.Dataset.
-        save_path: Path to save the CSV file.
-    """
+    """Save a per-class precision/recall/F1 report as CSV."""
     from sklearn.metrics import classification_report
 
     y_true, y_pred = get_predictions(model, dataset)

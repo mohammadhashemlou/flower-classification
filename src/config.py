@@ -1,7 +1,6 @@
-"""Central configuration for the flower classification project.
+"""Project-wide configuration.
 
-All hyperparameters, paths, and training settings live here so every
-module imports from a single source of truth.
+Everything tunable lives here so the rest of the code has one place to read from.
 """
 
 from pathlib import Path
@@ -10,9 +9,8 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Config:
-    """Project-wide configuration."""
+    """Paths and hyperparameters shared by the whole project."""
 
-    # ── Paths ────────────────────────────────────────────────────────
     project_root: Path = Path(__file__).resolve().parent.parent
 
     dataset_dir: Path = field(init=False)
@@ -21,16 +19,13 @@ class Config:
     models_dir: Path = field(init=False)
     experiments_dir: Path = field(init=False)
 
-    # ── Image ────────────────────────────────────────────────────────
     img_height: int = 224
     img_width: int = 224
     num_channels: int = 3
 
-    # ── Dataset ──────────────────────────────────────────────────────
     num_classes: int = 102
     batch_size: int = 32
 
-    # ── Training ─────────────────────────────────────────────────────
     epochs: int = 50
     initial_lr: float = 1e-3
     min_lr: float = 1e-6
@@ -38,7 +33,6 @@ class Config:
     reduce_lr_patience: int = 5
     reduce_lr_factor: float = 0.5
 
-    # ── Reproducibility ──────────────────────────────────────────────
     seed: int = 42
 
     def __post_init__(self) -> None:
@@ -47,11 +41,10 @@ class Config:
         self.models_dir = self.project_root / "models"
         self.experiments_dir = self.models_dir
 
-        # Ensure model directories exist
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
     def experiment_dir(self, name: str) -> Path:
-        """Return (and create) a sub-directory for a named experiment."""
+        """Return the output directory for an experiment, creating it if needed."""
         path = self.models_dir / name
         path.mkdir(parents=True, exist_ok=True)
         return path

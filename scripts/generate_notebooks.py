@@ -49,7 +49,7 @@ def make_notebook(cells, filename):
     print(f"Created: {path}")
 
 
-# ── 01: Data Exploration ──
+# Notebook 01: data exploration
 make_notebook(
     [
         md("# 1 - Data Exploration\n\nExplore the Oxford Flowers 102 dataset: class distribution, image sizes, and sample visualizations."),
@@ -135,7 +135,7 @@ make_notebook(
     "01_data_exploration.ipynb",
 )
 
-# ── 02: Data Preparation ──
+# Notebook 02: data preparation
 make_notebook(
     [
         md("# 2 - Data Preparation\n\nBuild the tf.data pipeline with preprocessing and augmentation."),
@@ -152,7 +152,7 @@ make_notebook(
             "cfg = Config()\n"
             "set_global_seed(cfg.seed)\n"
             "\n"
-            "train_ds, val_ds, test_ds = create_all_pipelines(cfg, augment_train=True)\n"
+            "train_ds, val_ds, test_ds = create_all_pipelines(cfg)\n"
             "\n"
             "print(f'Train batches: {tf.data.experimental.cardinality(train_ds).numpy()}')\n"
             "print(f'Val batches: {tf.data.experimental.cardinality(val_ds).numpy()}')\n"
@@ -177,7 +177,7 @@ make_notebook(
     "02_data_preparation.ipynb",
 )
 
-# ── 03: Baseline CNN ──
+# Notebook 03: baseline CNN
 make_notebook(
     [
         md("# 3 - Baseline CNN\n\nA simple from-scratch CNN to establish a performance baseline."),
@@ -196,7 +196,7 @@ make_notebook(
             "cfg = Config()\n"
             "set_global_seed(cfg.seed)\n"
             "\n"
-            "train_ds, val_ds, test_ds = create_all_pipelines(cfg, augment_train=True)\n"
+            "train_ds, val_ds, test_ds = create_all_pipelines(cfg)\n"
             "class_weights = compute_class_weights(cfg)"
         ),
         code("model = build_baseline_cnn(cfg)\nmodel.summary()"),
@@ -223,7 +223,7 @@ make_notebook(
     "03_baseline_cnn.ipynb",
 )
 
-# ── 04: Residual CNN ──
+# Notebook 04: residual CNN
 make_notebook(
     [
         md("# 4 - Residual CNN\n\nA custom ResNet-style network with skip connections for better gradient flow."),
@@ -243,7 +243,7 @@ make_notebook(
             "cfg.initial_lr = 5e-4\n"
             "set_global_seed(cfg.seed)\n"
             "\n"
-            "train_ds, val_ds, test_ds = create_all_pipelines(cfg, augment_train=True)\n"
+            "train_ds, val_ds, test_ds = create_all_pipelines(cfg)\n"
             "class_weights = compute_class_weights(cfg)"
         ),
         code("model = build_residual_cnn(cfg, augment=True)\nmodel.summary()"),
@@ -270,13 +270,13 @@ make_notebook(
     "04_residual_cnn.ipynb",
 )
 
-# ── 05: Transfer Learning ──
+# Notebook 05: transfer learning
 make_notebook(
     [
         md("# 5 - Transfer Learning (EfficientNetB0)\n\n"
-            "Leverage ImageNet-pretrained features for high accuracy with minimal overfitting.\n\n"
-            "**Phase 1**: Train with frozen backbone (only classification head learns).\n"
-            "**Phase 2**: Unfreeze top layers and fine-tune at a lower learning rate."),
+            "Use ImageNet-pretrained features to get high accuracy with less overfitting.\n\n"
+            "**Phase 1**: Train with the backbone frozen, so only the head learns.\n"
+            "**Phase 2**: Unfreeze the top layers and fine-tune at a lower learning rate."),
         code(
             "import sys\n"
             "from pathlib import Path\n"
@@ -294,7 +294,7 @@ make_notebook(
             "cfg.initial_lr = 1e-3\n"
             "set_global_seed(cfg.seed)\n"
             "\n"
-            "train_ds, val_ds, test_ds = create_all_pipelines(cfg, augment_train=True)\n"
+            "train_ds, val_ds, test_ds = create_all_pipelines(cfg)\n"
             "class_weights = compute_class_weights(cfg)"
         ),
         md("## Phase 1 - Frozen Backbone Training"),
@@ -341,7 +341,7 @@ make_notebook(
     "05_transfer_learning.ipynb",
 )
 
-# ── 06: Results Comparison ──
+# Notebook 06: results comparison
 make_notebook(
     [
         md("# 6 - Results Comparison\n\nCompare all models side-by-side."),

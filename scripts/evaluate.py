@@ -1,8 +1,6 @@
-"""Evaluate a saved checkpoint on the test split.
+"""Evaluate a saved checkpoint on a split.
 
-Usage
------
-    python scripts/evaluate.py --checkpoint models/transfer_efficientnetb0_frozen/best_model.keras
+    python scripts/evaluate.py --checkpoint models/06_efficientnet_finetuned_x2/best_model.keras
     python scripts/evaluate.py --checkpoint ... --confusion-matrix --report
 """
 
@@ -71,13 +69,13 @@ def main() -> None:
     set_global_seed(cfg.seed)
 
     print(f"Loading model: {ckpt}")
-    # compile=False: we only run inference, and skipping compilation avoids
-    # needing the exact training-time loss/optimizer to be deserializable.
+    # Inference only, so skip compilation and avoid needing the exact
+    # training-time loss and optimizer to deserialize.
     model = keras.models.load_model(str(ckpt), compile=False)
 
-    # A compile=False model has no loss/metrics attached, so .evaluate()
-    # would raise. Recompile with plain cross-entropy — we only need the
-    # accuracy and top-5 metrics here, not the training-time loss.
+    # A compile=False model has no loss or metrics attached, so .evaluate()
+    # would raise. Recompile with plain cross-entropy; only accuracy and top-5
+    # are needed here, not the training-time loss.
     compile_model(model, cfg, learning_rate=cfg.initial_lr, label_smoothing=0.0)
 
     print(f"Building '{args.split}' pipeline...")

@@ -1,14 +1,11 @@
 """Evaluate every saved checkpoint on the official test split.
 
-Produces ``results/test_metrics.csv`` — one row per experiment with
-top-1 and top-5 accuracy on the 6,149-image test split. This is the table
-quoted in the README, and it is the only place where test numbers are
-computed, so training-time model selection never sees the test set.
+Writes results/test_metrics.csv with top-1 and top-5 accuracy per experiment.
+This is the only place test numbers are computed, so model selection during
+training never sees the test set.
 
-Usage
------
     python scripts/benchmark.py
-    python scripts/benchmark.py --only 06_efficientnet_frozen 07_efficientnet_finetuned
+    python scripts/benchmark.py --only 06_efficientnet_finetuned_x2
 """
 
 from __future__ import annotations
@@ -107,7 +104,7 @@ def main() -> None:
                 }
             )
         except Exception as exc:  # pragma: no cover - defensive
-            print(f"  ! failed: {type(exc).__name__}: {exc}")
+            print(f"  failed: {type(exc).__name__}: {exc}")
 
     if not rows:
         print("\nNothing evaluated.")

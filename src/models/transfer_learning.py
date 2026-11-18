@@ -1,19 +1,4 @@
-"""Transfer learning model using ImageNet-pretrained backbones.
-
-Instead of training a CNN from scratch (which struggles on the small
-Oxford Flowers 102 dataset), we leverage ImageNet-pretrained features
-and fine-tune a custom classification head.
-
-This approach dramatically reduces overfitting and typically achieves
-85-95% accuracy on this dataset.
-
-IMPORTANT — input scaling:
-    Our data pipeline produces images in the range [0, 1].
-    Keras' EfficientNet includes its own Rescaling + Normalization layers
-    and therefore expects raw pixel values in [0, 255]. We insert a
-    Rescaling(255) layer before the backbone to bridge this gap.
-    ResNet50 expects Caffe-style preprocessing, handled explicitly.
-"""
+"""Transfer learning models built on ImageNet-pretrained backbones."""
 
 from __future__ import annotations
 
@@ -32,21 +17,11 @@ def _attach_backbone(
     freeze_backbone: bool,
     input_shape: tuple,
 ) -> tf.Tensor:
-    """Create a pretrained backbone and apply it to the input tensor.
+    """Apply a pretrained backbone to an input tensor.
 
-    The backbone is built standalone (via `input_shape`) and then *called*
-    on `x`. Building it with `input_tensor=` instead produces a model whose
-    internal Normalization layers hold EagerTensors, which makes `.keras`
-    serialization fail. Calling a standalone model avoids that entirely.
-
-    Args:
-        x: Input tensor already in [0, 255] range.
-        backbone: Backbone identifier.
-        freeze_backbone: Whether to freeze the backbone weights.
-        input_shape: Shape tuple for the backbone input, e.g. (224, 224, 3).
-
-    Returns:
-        The backbone's output tensor.
+    The backbone is built standalone and then called on `x`. Building it with
+    `input_tensor=` makes its internal Normalization layers hold EagerTensors,
+    which breaks .keras serialization.
     """
     builders = {
         "efficientnetb0": keras.applications.EfficientNetB0,
@@ -68,17 +43,15 @@ def _attach_backbone(
     )
     base.trainable = not freeze_backbone
 
-    # training=False keeps BatchNorm in inference mode (critical when frozen)
+    # training=False keeps BatchNorm in inference mode, which matters when frozen
     return base(x, training=False)
 
 
 def _coerce_rescaling_config(model: keras.Model) -> None:
-    """Make Rescaling layers JSON-serializable.
+    """Store Rescaling scale/offset as plain floats so .keras saving works.
 
-    Keras 2.10's EfficientNet builds its internal `Rescaling` layer with an
-    EagerTensor `scale`, which makes `model.save(...)` fail when it tries to
-    serialize the layer config. Converting these back to plain Python floats
-    has no effect on numerics and lets `.keras` saving work.
+    Keras 2.10's EfficientNet builds these layers with EagerTensor values and
+    the config writer cannot serialize them. Numerics are unchanged.
     """
     stack = [model]
     while stack:
@@ -99,26 +72,19 @@ def build_transfer_model(
     dropout_rate: float = 0.4,
     head_units: int = 0,
 ) -> keras.Model:
-    """Build a transfer learning model on top of a pretrained backbone.
+    """Build an uncompiled transfer learning model.
 
-    Head design is the single biggest lever against overfitting here.
-    With ~1020 training images, a 512→256 MLP head (≈660k parameters)
-    reaches 100% train accuracy within five epochs and then memorises.
-    The default head is therefore a single dropout-regularised linear
-    classifier on top of global average pooling (≈130k parameters), which
-    keeps the train/val gap small while the backbone learns the features.
+    The head is deliberately small. With ~1020 training images a wide MLP head
+    hits 100% train accuracy in a few epochs and then memorises, so the default
+    is a single dropout-regularised linear layer over global average pooling.
 
     Args:
         cfg: Project configuration.
-        backbone: Name of the backbone architecture.
-        freeze_backbone: If True, backbone weights are frozen (feature extraction).
-        augment: Whether to include the augmentation layer.
-        dropout_rate: Dropout rate in the classification head.
-        head_units: If > 0, add a hidden dense layer of this width (wide
-            head). If 0 (default), use a compact linear head.
-
-    Returns:
-        A keras.Model (not yet compiled).
+        backbone: Backbone name.
+        freeze_backbone: Freeze backbone weights for feature extraction.
+        augment: Include the augmentation layer.
+        dropout_rate: Dropout rate in the head.
+        head_units: Width of an extra hidden dense layer. 0 means no hidden layer.
     """
     inputs = keras.Input(
         shape=(cfg.img_height, cfg.img_width, cfg.num_channels),
@@ -127,14 +93,12 @@ def build_transfer_model(
 
     x = inputs
 
-    # Data augmentation (no-op at inference time)
     if augment:
         x = build_augmentation_layer(cfg.img_height, cfg.img_width)(x)
 
-    # Our pipeline yields [0, 1]; backbones expect [0, 255].
+    # Pipeline emits [0, 1]; backbones expect [0, 255]
     x = layers.Rescaling(255.0, name="to_0_255")(x)
 
-    # Caffe-style preprocessing for ResNet50
     if backbone == "resnet50":
         mean_bgr = tf.constant([103.939, 116.779, 123.68], dtype=tf.float32)
         x = layers.Lambda(
@@ -142,7 +106,6 @@ def build_transfer_model(
             name="resnet_preprocess",
         )(x)
 
-    # Pretrained backbone (applied as a callable, returns a tensor)
     features = _attach_backbone(
         x,
         backbone,
@@ -150,7 +113,6 @@ def build_transfer_model(
         (cfg.img_height, cfg.img_width, cfg.num_channels),
     )
 
-    # ── Classification head ─────────────────────────────────────────
     features = layers.GlobalAveragePooling2D(name="gap")(features)
     features = layers.Dropout(dropout_rate, name="head_dropout")(features)
 
@@ -168,7 +130,6 @@ def build_transfer_model(
 
     model = keras.Model(inputs=inputs, outputs=outputs, name=f"transfer_{backbone}")
 
-    # Allow full-model serialization to .keras
     _coerce_rescaling_config(model)
 
     return model
@@ -179,23 +140,18 @@ def unfreeze_backbone(
     num_layers_to_unfreeze: int = 20,
     verbose: bool = True,
 ) -> None:
-    """Partially unfreeze the backbone for fine-tuning.
+    """Unfreeze the top N backbone layers for fine-tuning.
 
-    Call this AFTER initial training with a frozen backbone. It unfreezes
-    the top N layers of the backbone while keeping the rest frozen, allowing
-    gentle fine-tuning at a lower learning rate.
-
-    BatchNormalization layers inside the backbone are kept frozen — this is
-    the standard recommendation for fine-tuning with small batch sizes.
+    Call this after training with a frozen backbone. BatchNorm layers stay
+    frozen; they need larger batches than we use to give reliable statistics.
 
     Args:
         model: The transfer learning model.
-        num_layers_to_unfreeze: How many backbone layers to unfreeze from the top.
-        verbose: Whether to print a summary of the unfreezing.
+        num_layers_to_unfreeze: How many layers to unfreeze from the top.
+        verbose: Print a short summary.
     """
-    # Find the backbone sub-model: the largest nested model in the graph.
-    # (The augmentation Sequential is also a Model, so we cannot just take
-    # the first match — we pick the one with the most layers.)
+    # The augmentation Sequential is also a Model, so pick the one with the
+    # most layers rather than the first match.
     nested_models = [
         layer
         for layer in model.layers
@@ -210,13 +166,12 @@ def unfreeze_backbone(
     for layer in backbone.layers[:-num_layers_to_unfreeze]:
         layer.trainable = False
 
-    # Keep BatchNorm layers frozen (they need large batches to be reliable)
     for layer in backbone.layers:
         if isinstance(layer, layers.BatchNormalization):
             layer.trainable = False
 
     if verbose:
-        trainable = sum(1 for l in backbone.layers if l.trainable)
+        trainable = sum(1 for layer in backbone.layers if layer.trainable)
         print(f"Unfroze top {num_layers_to_unfreeze} layers of '{backbone.name}'.")
         print(f"Trainable backbone layers: {trainable} / {len(backbone.layers)}")
         total_trainable = sum(

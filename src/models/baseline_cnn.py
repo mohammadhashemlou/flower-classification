@@ -1,11 +1,8 @@
-"""Baseline CNN — a simple from-scratch convolutional network.
+"""Baseline CNN trained from scratch.
 
-Architecture:
-    4 x [Conv2D -> BatchNorm -> ReLU -> Conv2D -> BatchNorm -> ReLU -> MaxPool -> Dropout]
-    -> GlobalAveragePooling -> Dense(256) -> Dropout(0.5) -> Dense(102, softmax)
-
-This model serves as the starting point. It overfits on the small dataset
-but establishes a performance floor to improve upon.
+Four conv blocks with batch norm and pooling, then global average pooling and
+a small dense head. It overfits on this dataset but sets the floor to compare
+the transfer learning models against.
 """
 
 from __future__ import annotations
@@ -16,64 +13,28 @@ from tensorflow.keras import layers
 from ..config import Config
 
 
+def _conv_block(x, filters: int, dropout: float):
+    """Two 3x3 convs with batch norm and ReLU, then pool and dropout."""
+    for _ in range(2):
+        x = layers.Conv2D(filters, (3, 3), padding="same", use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Activation("relu")(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    return layers.Dropout(dropout)(x)
+
+
 def build_baseline_cnn(cfg: Config) -> keras.Model:
-    """Build the baseline CNN model.
+    """Build the baseline CNN. Not compiled."""
+    inputs = layers.Input(shape=(cfg.img_height, cfg.img_width, cfg.num_channels))
 
-    Args:
-        cfg: Project configuration.
+    x = _conv_block(inputs, 32, 0.20)
+    x = _conv_block(x, 64, 0.25)
+    x = _conv_block(x, 128, 0.30)
+    x = _conv_block(x, 256, 0.35)
 
-    Returns:
-        A keras.Model ready for compilation.
-    """
-    model = keras.Sequential(name="baseline_cnn")
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(256, activation="relu")(x)
+    x = layers.Dropout(0.5)(x)
+    outputs = layers.Dense(cfg.num_classes, activation="softmax")(x)
 
-    # Input
-    model.add(layers.Input(shape=(cfg.img_height, cfg.img_width, cfg.num_channels)))
-
-    # Block 1 - 32 filters
-    model.add(layers.Conv2D(32, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.Conv2D(32, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.2))
-
-    # Block 2 - 64 filters
-    model.add(layers.Conv2D(64, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.Conv2D(64, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.25))
-
-    # Block 3 - 128 filters
-    model.add(layers.Conv2D(128, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.Conv2D(128, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.3))
-
-    # Block 4 - 256 filters
-    model.add(layers.Conv2D(256, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.Conv2D(256, (3, 3), padding="same", use_bias=False))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Activation("relu"))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.35))
-
-    # Classification head
-    model.add(layers.GlobalAveragePooling2D())
-    model.add(layers.Dense(256, activation="relu"))
-    model.add(layers.Dropout(0.5))
-    model.add(layers.Dense(cfg.num_classes, activation="softmax"))
-
-    return model
+    return keras.Model(inputs=inputs, outputs=outputs, name="baseline_cnn")

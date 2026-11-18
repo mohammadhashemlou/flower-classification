@@ -1,10 +1,8 @@
-"""Compare every trained experiment side-by-side.
+"""Compare every trained experiment side by side.
 
-Reads ``history.csv`` from each run under ``models/``, prints a ranked
-summary table, and writes a comparison plot to ``results/``.
+Reads history.csv from each run under models/, prints a ranked table and
+writes a comparison plot.
 
-Usage
------
     python scripts/compare.py
     python scripts/compare.py --output results/comparison.png
 """
@@ -41,7 +39,7 @@ def collect(cfg: Config) -> pd.DataFrame:
         try:
             df = pd.read_csv(history)
         except Exception as exc:  # pragma: no cover - defensive
-            print(f"  ! skipping {name}: {exc}")
+            print(f"  skipping {name}: {exc}")
             continue
         if df.empty or "val_accuracy" not in df.columns:
             continue
@@ -72,7 +70,7 @@ def plot_comparison(cfg: Config, out_path: Path) -> None:
 
     histories = sorted(cfg.models_dir.glob("*/history.csv"))
     if not histories:
-        print("No histories found — nothing to plot.")
+        print("No histories found, nothing to plot.")
         return
 
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -88,7 +86,7 @@ def plot_comparison(cfg: Config, out_path: Path) -> None:
             label=PRETTY_NAMES.get(name, name),
         )
 
-    ax.set_title("Validation accuracy — all experiments", fontsize=13, weight="bold")
+    ax.set_title("Validation accuracy across experiments", fontsize=13, weight="bold")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Validation accuracy (%)")
     ax.grid(True, alpha=0.3)

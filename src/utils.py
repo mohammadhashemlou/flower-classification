@@ -1,4 +1,4 @@
-"""Utility helpers — seeding, plotting, logging."""
+"""Seeding, GPU setup and plotting helpers."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Optional
 
 
 def set_global_seed(seed: int = 42) -> None:
-    """Set all random seeds for full reproducibility."""
+    """Seed python, numpy and tensorflow."""
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -25,22 +25,15 @@ def set_global_seed(seed: int = 42) -> None:
 
 
 def configure_gpu(memory_growth: bool = True) -> list:
-    """Enable GPU memory growth and report available devices.
+    """Turn on GPU memory growth and report what is available.
 
-    Without memory growth TensorFlow grabs the entire GPU memory on first
-    use, which makes the machine unusable and blocks other processes.
-    Enabling growth allocates on demand instead.
-
-    Args:
-        memory_growth: Whether to enable per-device memory growth.
-
-    Returns:
-        List of physical GPU devices TensorFlow can see.
+    Without memory growth TensorFlow takes the whole GPU on first use, which
+    blocks other processes. Growth allocates as needed instead.
     """
     gpus = tf.config.list_physical_devices("GPU")
 
     if not gpus:
-        print("⚠  No GPU detected — training will run on CPU.")
+        print("No GPU detected, training will run on CPU.")
         return gpus
 
     if memory_growth:
@@ -48,28 +41,28 @@ def configure_gpu(memory_growth: bool = True) -> list:
             try:
                 tf.config.experimental.set_memory_growth(gpu, True)
             except RuntimeError as exc:
-                # Already initialised — growth must be set before first use
+                # Growth has to be set before the device is first used
                 print(f"  (memory growth not applied: {exc})")
 
     for gpu in gpus:
         details = tf.config.experimental.get_device_details(gpu)
         name = details.get("device_name", gpu.name)
-        print(f"✓ GPU available: {name}")
+        print(f"GPU available: {name}")
 
     return gpus
 
 
 def load_oxford_flowers_metadata(dataset_dir: Path):
-    """Load labels and train/val/test splits from the Oxford Flowers 102 .mat files.
+    """Read labels and splits from the Oxford Flowers 102 .mat files.
 
     Returns:
-        labels: np.ndarray of shape (8189,) — 0-based class indices
-        train_ids, valid_ids, test_ids: np.ndarray of image IDs (1-based)
+        labels: (8189,) 0-based class indices
+        train_ids, valid_ids, test_ids: 1-based image IDs
     """
     from scipy.io import loadmat
 
     labels = loadmat(dataset_dir / "imagelabels.mat")["labels"].flatten()
-    labels = labels.astype(np.int32) - 1  # convert to 0-based
+    labels = labels.astype(np.int32) - 1
 
     setid = loadmat(dataset_dir / "setid.mat")
     train_ids = setid["trnid"].flatten().astype(np.int32)
@@ -80,7 +73,7 @@ def load_oxford_flowers_metadata(dataset_dir: Path):
 
 
 def image_id_to_path(images_dir: Path, image_id: int) -> str:
-    """Convert a 1-based image ID to its file path string."""
+    """Map a 1-based image ID to its file path."""
     return str(images_dir / f"image_{image_id:05d}.jpg")
 
 
@@ -89,20 +82,10 @@ def plot_training_history(
     save_path: Optional[Path] = None,
     title: str = "Training History",
 ) -> Path:
-    """Plot accuracy & loss curves from a CSVLogger output file.
+    """Write accuracy and loss curves to a PNG.
 
-    Always renders to a PNG file. The non-interactive Agg backend is forced
-    so this works in headless contexts (CI, servers, background runs) where
-    a GUI backend would block forever on ``plt.show()``.
-
-    Args:
-        history_csv: Path to the ``history.csv`` written by CSVLogger.
-        save_path: Output image path. Defaults to ``training_curves.png``
-            next to the CSV.
-        title: Plot title.
-
-    Returns:
-        The path the figure was written to.
+    The Agg backend is forced so this also works on machines without a display,
+    where a GUI backend would hang on plt.show().
     """
     import matplotlib
 
@@ -115,19 +98,17 @@ def plot_training_history(
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 5))
 
-    # Accuracy
     axes[0].plot(df["epoch"] + 1, df["accuracy"], label="Train", linewidth=1.5)
     axes[0].plot(df["epoch"] + 1, df["val_accuracy"], label="Validation", linewidth=1.5)
-    axes[0].set_title(f"{title} — Accuracy")
+    axes[0].set_title(f"{title} - Accuracy")
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Accuracy")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
-    # Loss
     axes[1].plot(df["epoch"] + 1, df["loss"], label="Train", linewidth=1.5)
     axes[1].plot(df["epoch"] + 1, df["val_loss"], label="Validation", linewidth=1.5)
-    axes[1].set_title(f"{title} — Loss")
+    axes[1].set_title(f"{title} - Loss")
     axes[1].set_xlabel("Epoch")
     axes[1].set_ylabel("Loss")
     axes[1].legend()

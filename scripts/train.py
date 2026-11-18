@@ -1,19 +1,12 @@
 """Command-line training entry point.
 
-Usage examples
---------------
-    # Baseline CNN
+Examples:
+
     python scripts/train.py --model baseline --epochs 30
-
-    # Residual CNN
     python scripts/train.py --model residual --epochs 60
-
-    # Transfer learning — phase 1 (frozen backbone)
     python scripts/train.py --model transfer --backbone efficientnetb0 --epochs 20
-
-    # Transfer learning — phase 2 (fine-tune)
-    python scripts/train.py --model transfer --backbone efficientnetb0 \
-        --epochs 15 --fine-tune --init-from models/transfer_phase1/best_model.keras
+    python scripts/train.py --model transfer --epochs 15 --fine-tune \
+        --init-from models/transfer_phase1/best_model.keras
 """
 
 from __future__ import annotations
@@ -22,12 +15,11 @@ import argparse
 import sys
 from pathlib import Path
 
-# Make the project root importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Register CUDA DLL directories BEFORE TensorFlow is imported
+# CUDA DLLs have to be registered before TensorFlow is imported
 from gpu_env import setup_cuda_dlls  # noqa: E402
 
 setup_cuda_dlls(verbose=False)
@@ -65,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         "--model",
         choices=["baseline", "residual", "transfer"],
         default="transfer",
-        help="Which architecture to train (default: transfer).",
+        help="Architecture to train (default: transfer).",
     )
     parser.add_argument(
         "--backbone",
@@ -95,7 +87,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--init-from",
         default=None,
-        help="Path to a .keras file to initialise weights from (for fine-tuning).",
+        help="Path to a .keras file to initialise weights from.",
     )
     parser.add_argument(
         "--no-augment",
@@ -121,7 +113,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cosine",
         action="store_true",
-        help="Use a cosine LR schedule (with warmup) instead of ReduceLROnPlateau.",
+        help="Use a cosine LR schedule instead of ReduceLROnPlateau.",
     )
     parser.add_argument(
         "--head-units",
@@ -132,8 +124,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--train-on-trainval",
         action="store_true",
-        help="Merge the official val split into training (2x data) and hold "
-        "out 10%% of the merged pool for monitoring. Test split stays untouched.",
+        help="Merge the official val split into training and hold out 10%% for "
+        "monitoring. The test split stays untouched.",
     )
     return parser.parse_args()
 
@@ -141,11 +133,9 @@ def parse_args() -> argparse.Namespace:
 def build_model(args: argparse.Namespace, cfg: Config) -> keras.Model:
     """Instantiate the requested architecture.
 
-    When ``--init-from`` points at a saved ``.keras`` model, the whole model
-    (architecture + weights) is restored instead of re-creating it and
-    copying weights. This is required for fine-tuning: the restored model
-    already contains the trained head, so unfreezing its backbone continues
-    from the phase-1 optimum rather than from ImageNet weights.
+    With --init-from the whole saved model is restored rather than rebuilt and
+    weight-copied. Fine-tuning needs this: the restored model already has the
+    trained head, so unfreezing continues from the phase-1 optimum.
     """
     if args.model == "baseline":
         return build_baseline_cnn(cfg)
@@ -153,7 +143,6 @@ def build_model(args: argparse.Namespace, cfg: Config) -> keras.Model:
     if args.model == "residual":
         return build_residual_cnn(cfg, augment=not args.no_augment)
 
-    # ── transfer ────────────────────────────────────────────────────
     if args.init_from:
         init_path = Path(args.init_from)
         if not init_path.exists():
@@ -194,7 +183,7 @@ def main() -> None:
     gpus = configure_gpu()
 
     print("=" * 64)
-    print("  Flower Classification — Training")
+    print("  Flower Classification - Training")
     print("=" * 64)
     print(f"  TensorFlow : {tf.__version__}")
     print(f"  Keras      : {keras.__version__}")
@@ -208,20 +197,17 @@ def main() -> None:
     print(f"  LR         : {cfg.initial_lr}")
     print("=" * 64 + "\n")
 
-    # ── Data ────────────────────────────────────────────────────────
     if args.train_on_trainval:
         train_ds, val_ds, test_ds = create_trainval_pipelines(cfg, val_fraction=0.1)
         class_weight = (
             None if args.no_class_weights else compute_class_weights_trainval(cfg, 0.1)
         )
     else:
-        train_ds, val_ds, test_ds = create_all_pipelines(cfg, augment_train=False)
+        train_ds, val_ds, test_ds = create_all_pipelines(cfg)
         class_weight = None if args.no_class_weights else compute_class_weights(cfg)
 
-    # ── Model ───────────────────────────────────────────────────────
     model = build_model(args, cfg)
 
-    # Transfer learning needs a lower LR for fine-tuning
     lr = cfg.initial_lr
     if args.model == "transfer" and args.fine_tune:
         lr = min(lr, 1e-4)
@@ -243,7 +229,6 @@ def main() -> None:
         suffix = "finetune" if args.fine_tune else "frozen"
         experiment = args.experiment or f"transfer_{args.backbone}_{suffix}"
 
-    # ── Train ───────────────────────────────────────────────────────
     train_model(
         model,
         train_ds,
@@ -255,11 +240,9 @@ def main() -> None:
         label_smoothing=args.label_smoothing,
     )
 
-    # ── Curves ──────────────────────────────────────────────────────
     exp_dir = cfg.experiment_dir(experiment)
     plot_training_history(exp_dir / "history.csv", title=experiment)
 
-    # ── Evaluate ────────────────────────────────────────────────────
     if not args.no_evaluate:
         print("\n" + "=" * 64)
         print("  Test-set evaluation")
@@ -267,8 +250,7 @@ def main() -> None:
         best = exp_dir / "best_model.keras"
         if best.exists():
             eval_model = keras.models.load_model(best, compile=False)
-            # A checkpoint loaded with compile=False has no optimizer/metrics,
-            # so it must be compiled before .evaluate() can run.
+            # compile=False drops optimizer and metrics, so recompile to evaluate
             compile_model(
                 eval_model, cfg, learning_rate=lr, label_smoothing=args.label_smoothing
             )

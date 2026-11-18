@@ -1,33 +1,24 @@
-"""Training logic — compile, callbacks, and fit loop.
-
-Provides a clean train_model() function that handles compilation,
-callback setup (checkpoint, early stopping, LR scheduling, CSV logging),
-and the training loop.
-"""
+"""Model compilation, callbacks and the training loop."""
 
 from __future__ import annotations
 
+from typing import Dict, Optional
+
 import tensorflow as tf
 from tensorflow import keras
-from typing import Optional, Dict
 
 from .config import Config
 
 
 class _NumericLrCallback(keras.callbacks.Callback):
-    """Record a numeric learning rate in the logs.
+    """Log the learning rate as a number.
 
-    With a ``LearningRateSchedule`` the optimizer's ``learning_rate`` is a
-    callable, so ``logs['lr']`` ends up holding an object and CSVLogger
-    writes garbage. This callback resolves the schedule at the current step
-    so the CSV always contains a real number.
+    When the optimizer uses a schedule, ``logs['lr']`` is the schedule object
+    and CSVLogger writes that instead of a value.
     """
 
     def on_epoch_end(self, epoch, logs=None):
-        if logs is None or "lr" not in logs:
-            return
-        lr = logs["lr"]
-        if isinstance(lr, (int, float)):
+        if logs is None or "lr" not in logs or isinstance(logs["lr"], (int, float)):
             return
 
         schedule = self.model.optimizer.learning_rate
@@ -36,22 +27,79 @@ class _NumericLrCallback(keras.callbacks.Callback):
         logs["lr"] = float(keras.backend.get_value(value))
 
 
+def build_cosine_lr_schedule(
+    cfg: Config,
+    steps_per_epoch: int,
+) -> keras.optimizers.schedules.LearningRateSchedule:
+    """Cosine decay from initial_lr down to min_lr."""
+    total_steps = cfg.epochs * steps_per_epoch
+    warmup_steps = 5 * steps_per_epoch
+
+    try:
+        return keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=cfg.initial_lr,
+            decay_steps=total_steps - warmup_steps,
+            alpha=cfg.min_lr / cfg.initial_lr,
+            warmup_target=cfg.initial_lr,
+            warmup_steps=warmup_steps,
+        )
+    except TypeError:
+        # warmup_target/warmup_steps only exist in newer TensorFlow builds
+        return keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=cfg.initial_lr,
+            decay_steps=total_steps,
+            alpha=cfg.min_lr / cfg.initial_lr,
+        )
+
+
+@keras.utils.register_keras_serializable(package="flower")
+class LabelSmoothingSparseCategoricalCrossentropy(keras.losses.Loss):
+    """Cross-entropy with label smoothing.
+
+    Keras 2.10's SparseCategoricalCrossentropy has no label_smoothing
+    argument. Registering the class keeps it serialisable inside .keras
+    files, so checkpoints load without custom_objects.
+    """
+
+    def __init__(self, num_classes: int = 102, smoothing: float = 0.1, **kwargs):
+        super().__init__(**kwargs)
+        self.num_classes = int(num_classes)
+        self.smoothing = float(smoothing)
+
+    def call(self, y_true, y_pred):
+        y_true = tf.cast(tf.reshape(y_true, [-1]), tf.int32)
+        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0)
+
+        y_one_hot = tf.one_hot(y_true, self.num_classes)
+        y_smooth = y_one_hot * (1.0 - self.smoothing) + self.smoothing / self.num_classes
+
+        return tf.reduce_mean(-tf.reduce_sum(y_smooth * tf.math.log(y_pred), axis=-1))
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"num_classes": self.num_classes, "smoothing": self.smoothing})
+        return config
+
+
+def _build_loss(cfg: Config, label_smoothing: float):
+    if label_smoothing <= 0:
+        return keras.losses.SparseCategoricalCrossentropy()
+
+    return LabelSmoothingSparseCategoricalCrossentropy(
+        num_classes=cfg.num_classes,
+        smoothing=label_smoothing,
+    )
+
+
 def build_callbacks(
     cfg: Config,
     experiment_name: str,
     use_schedule: bool = False,
 ) -> list:
-    """Create the standard set of training callbacks.
+    """Checkpoint, early stopping, optional ReduceLROnPlateau, CSV log.
 
-    Args:
-        cfg: Project configuration.
-        experiment_name: Name used for the save directory.
-        use_schedule: Set True when the optimizer uses a LearningRateSchedule.
-            ``ReduceLROnPlateau`` cannot mutate a schedule (it expects a
-            mutable scalar LR), so it is omitted in that case.
-
-    Returns:
-        List of keras.callbacks.Callback instances.
+    ReduceLROnPlateau is skipped when a schedule drives the optimizer,
+    because it can only write to a scalar learning rate.
     """
     exp_dir = cfg.experiment_dir(experiment_name)
 
@@ -71,7 +119,6 @@ def build_callbacks(
             restore_best_weights=True,
             verbose=1,
         ),
-        # Runs before CSVLogger so the CSV records a float, not a schedule
         _NumericLrCallback(),
         keras.callbacks.CSVLogger(
             filename=str(exp_dir / "history.csv"),
@@ -94,115 +141,13 @@ def build_callbacks(
     return callbacks
 
 
-def build_cosine_lr_schedule(
-    cfg: Config,
-    steps_per_epoch: int,
-) -> keras.optimizers.schedules.LearningRateSchedule:
-    """Build a cosine-decay learning rate schedule with warmup.
-
-    The first 5 epochs use linear warmup from 1e-6 to initial_lr,
-    followed by cosine decay down to min_lr.
-
-    Args:
-        cfg: Project configuration.
-        steps_per_epoch: Number of batches in one epoch.
-
-    Returns:
-        A LearningRateSchedule callable.
-    """
-    warmup_epochs = 5
-    total_steps = cfg.epochs * steps_per_epoch
-    warmup_steps = warmup_epochs * steps_per_epoch
-
-    # CosineDecay with warmup — falls back gracefully if warmup params
-    # are not supported (TF < 2.14)
-    try:
-        return keras.optimizers.schedules.CosineDecay(
-            initial_learning_rate=cfg.initial_lr,
-            decay_steps=total_steps - warmup_steps,
-            alpha=cfg.min_lr / cfg.initial_lr,
-            warmup_target=cfg.initial_lr,
-            warmup_steps=warmup_steps,
-        )
-    except TypeError:
-        # TF < 2.14: no warmup support — use plain cosine decay
-        return keras.optimizers.schedules.CosineDecay(
-            initial_learning_rate=cfg.initial_lr,
-            decay_steps=total_steps,
-            alpha=cfg.min_lr / cfg.initial_lr,
-        )
-
-
-@keras.utils.register_keras_serializable(package="flower")
-class LabelSmoothingSparseCategoricalCrossentropy(keras.losses.Loss):
-    """Sparse categorical cross-entropy with label smoothing.
-
-    Keras 2.10's built-in ``SparseCategoricalCrossentropy`` has no
-    ``label_smoothing`` argument, so we implement it as a proper ``Loss``
-    subclass. Being a registered subclass (rather than a plain closure) means
-    it is serialized into ``.keras`` files and restored automatically — no
-    ``custom_objects`` needed when loading a checkpoint.
-
-    Smoothing stops the model from becoming overconfident, which measurably
-    reduces overfitting on small datasets such as Oxford Flowers 102.
-    """
-
-    def __init__(self, num_classes: int = 102, smoothing: float = 0.1, **kwargs):
-        super().__init__(**kwargs)
-        self.num_classes = int(num_classes)
-        self.smoothing = float(smoothing)
-
-    def call(self, y_true, y_pred):
-        y_true = tf.cast(tf.reshape(y_true, [-1]), tf.int32)
-        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0)
-
-        y_one_hot = tf.one_hot(y_true, self.num_classes)
-        y_smooth = y_one_hot * (1.0 - self.smoothing) + self.smoothing / self.num_classes
-
-        return tf.reduce_mean(
-            -tf.reduce_sum(y_smooth * tf.math.log(y_pred), axis=-1)
-        )
-
-    def get_config(self):
-        config = super().get_config()
-        config.update(
-            {
-                "num_classes": self.num_classes,
-                "smoothing": self.smoothing,
-            }
-        )
-        return config
-
-
-def _build_loss(cfg: Config, label_smoothing: float):
-    """Return the sparse categorical cross-entropy loss to use.
-
-    Uses the registered smoothing loss when smoothing is requested, so the
-    resulting checkpoint stays loadable without custom objects.
-    """
-    if label_smoothing <= 0:
-        return keras.losses.SparseCategoricalCrossentropy()
-
-    return LabelSmoothingSparseCategoricalCrossentropy(
-        num_classes=cfg.num_classes,
-        smoothing=label_smoothing,
-    )
-
-
 def compile_model(
     model: keras.Model,
     cfg: Config,
     learning_rate: Optional[float] = None,
     label_smoothing: float = 0.1,
 ) -> None:
-    """Compile a model with standard settings.
-
-    Args:
-        model: The keras model to compile.
-        cfg: Project configuration.
-        learning_rate: Override the initial learning rate (None = use cfg).
-        label_smoothing: Label smoothing factor (0 = disabled).
-    """
+    """Compile with Adam and top-1/top-5 accuracy metrics."""
     lr = learning_rate if learning_rate is not None else cfg.initial_lr
 
     model.compile(
@@ -225,22 +170,7 @@ def train_model(
     use_cosine_schedule: bool = False,
     label_smoothing: float = 0.1,
 ) -> keras.callbacks.History:
-    """Train a model end-to-end with callbacks and optional class weights.
-
-    Args:
-        model: A compiled (or uncompiled) keras model.
-        train_ds: Training tf.data.Dataset.
-        val_ds: Validation tf.data.Dataset.
-        cfg: Project configuration.
-        experiment_name: Name for checkpoint/log directory.
-        class_weight: Optional dict of class weights for imbalanced data.
-        use_cosine_schedule: If True, use cosine LR schedule instead of ReduceLROnPlateau.
-        label_smoothing: Label smoothing factor for cross-entropy loss.
-
-    Returns:
-        The training History object.
-    """
-    # Compile if not already compiled
+    """Fit the model and return its history."""
     if not model.optimizer:
         if use_cosine_schedule:
             steps = tf.data.experimental.cardinality(train_ds).numpy()
@@ -259,7 +189,7 @@ def train_model(
     print(f"  Initial LR: {cfg.initial_lr}")
     print(f"{'=' * 60}\n")
 
-    history = model.fit(
+    return model.fit(
         train_ds,
         validation_data=val_ds,
         epochs=cfg.epochs,
@@ -267,5 +197,3 @@ def train_model(
         class_weight=class_weight,
         verbose=1,
     )
-
-    return history
