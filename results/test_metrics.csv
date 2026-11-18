@@ -1,0 +1,7 @@
+experiment,label,test_loss,test_top1,test_top5
+06_efficientnet_finetuned_x2,EfficientNetB0 fine-tuned (train+val),0.621,0.8866,0.9707
+04_efficientnet_finetuned,EfficientNetB0 fine-tuned,1.0252,0.837,0.9467
+03_efficientnet_frozen,EfficientNetB0 frozen,1.0674,0.7985,0.9418
+05_efficientnet_frozen_x2,EfficientNetB0 frozen (train+val),0.963,0.7956,0.934
+02_residual_cnn,Residual CNN (from scratch),3.0091,0.2989,0.5583
+01_baseline_cnn,Baseline CNN (from scratch),3.0256,0.2596,0.5646
