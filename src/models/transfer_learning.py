@@ -96,10 +96,17 @@ def build_transfer_model(
     backbone: str = "efficientnetb0",
     freeze_backbone: bool = True,
     augment: bool = True,
-    dropout_rate: float = 0.3,
-    head_units: int = 512,
+    dropout_rate: float = 0.4,
+    head_units: int = 0,
 ) -> keras.Model:
     """Build a transfer learning model on top of a pretrained backbone.
+
+    Head design is the single biggest lever against overfitting here.
+    With ~1020 training images, a 512→256 MLP head (≈660k parameters)
+    reaches 100% train accuracy within five epochs and then memorises.
+    The default head is therefore a single dropout-regularised linear
+    classifier on top of global average pooling (≈130k parameters), which
+    keeps the train/val gap small while the backbone learns the features.
 
     Args:
         cfg: Project configuration.
@@ -107,7 +114,8 @@ def build_transfer_model(
         freeze_backbone: If True, backbone weights are frozen (feature extraction).
         augment: Whether to include the augmentation layer.
         dropout_rate: Dropout rate in the classification head.
-        head_units: Number of units in the first dense head layer.
+        head_units: If > 0, add a hidden dense layer of this width (wide
+            head). If 0 (default), use a compact linear head.
 
     Returns:
         A keras.Model (not yet compiled).
@@ -142,17 +150,15 @@ def build_transfer_model(
         (cfg.img_height, cfg.img_width, cfg.num_channels),
     )
 
-    # Classification head
+    # ── Classification head ─────────────────────────────────────────
     features = layers.GlobalAveragePooling2D(name="gap")(features)
-    features = layers.Dense(head_units, name="head_fc1")(features)
-    features = layers.BatchNormalization(name="head_bn1")(features)
-    features = layers.Activation("relu", name="head_relu1")(features)
-    features = layers.Dropout(dropout_rate, name="head_drop1")(features)
+    features = layers.Dropout(dropout_rate, name="head_dropout")(features)
 
-    features = layers.Dense(head_units // 2, name="head_fc2")(features)
-    features = layers.BatchNormalization(name="head_bn2")(features)
-    features = layers.Activation("relu", name="head_relu2")(features)
-    features = layers.Dropout(dropout_rate * 0.5, name="head_drop2")(features)
+    if head_units > 0:
+        features = layers.Dense(head_units, name="head_fc1")(features)
+        features = layers.BatchNormalization(name="head_bn1")(features)
+        features = layers.Activation("relu", name="head_relu1")(features)
+        features = layers.Dropout(dropout_rate, name="head_drop2")(features)
 
     outputs = layers.Dense(
         cfg.num_classes,

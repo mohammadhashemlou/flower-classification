@@ -70,7 +70,9 @@ def main() -> None:
     set_global_seed(cfg.seed)
 
     print(f"Loading model: {ckpt}")
-    model = keras.models.load_model(str(ckpt))
+    # compile=False: we only run inference, and skipping compilation avoids
+    # needing the exact training-time loss/optimizer to be deserializable.
+    model = keras.models.load_model(str(ckpt), compile=False)
 
     print(f"Building '{args.split}' pipeline...")
     ds = create_data_pipeline(cfg, split=args.split)

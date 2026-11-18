@@ -88,18 +88,36 @@ def plot_training_history(
     history_csv: Path,
     save_path: Optional[Path] = None,
     title: str = "Training History",
-) -> None:
-    """Plot accuracy & loss curves from a CSVLogger output file."""
+) -> Path:
+    """Plot accuracy & loss curves from a CSVLogger output file.
+
+    Always renders to a PNG file. The non-interactive Agg backend is forced
+    so this works in headless contexts (CI, servers, background runs) where
+    a GUI backend would block forever on ``plt.show()``.
+
+    Args:
+        history_csv: Path to the ``history.csv`` written by CSVLogger.
+        save_path: Output image path. Defaults to ``training_curves.png``
+            next to the CSV.
+        title: Plot title.
+
+    Returns:
+        The path the figure was written to.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import pandas as pd
 
     df = pd.read_csv(history_csv)
+    out_path = Path(save_path) if save_path else Path(history_csv).parent / "training_curves.png"
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 5))
 
     # Accuracy
-    axes[0].plot(df["accuracy"], label="Train", linewidth=1.5)
-    axes[0].plot(df["val_accuracy"], label="Validation", linewidth=1.5)
+    axes[0].plot(df["epoch"] + 1, df["accuracy"], label="Train", linewidth=1.5)
+    axes[0].plot(df["epoch"] + 1, df["val_accuracy"], label="Validation", linewidth=1.5)
     axes[0].set_title(f"{title} — Accuracy")
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Accuracy")
@@ -107,16 +125,19 @@ def plot_training_history(
     axes[0].grid(True, alpha=0.3)
 
     # Loss
-    axes[1].plot(df["loss"], label="Train", linewidth=1.5)
-    axes[1].plot(df["val_loss"], label="Validation", linewidth=1.5)
+    axes[1].plot(df["epoch"] + 1, df["loss"], label="Train", linewidth=1.5)
+    axes[1].plot(df["epoch"] + 1, df["val_loss"], label="Validation", linewidth=1.5)
     axes[1].set_title(f"{title} — Loss")
     axes[1].set_xlabel("Epoch")
     axes[1].set_ylabel("Loss")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
-    plt.tight_layout()
+    fig.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.show()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"Training curves saved to: {out_path}")
+    return out_path

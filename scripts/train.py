@@ -36,7 +36,12 @@ import tensorflow as tf  # noqa: E402
 from tensorflow import keras  # noqa: E402
 
 from src.config import Config  # noqa: E402
-from src.data_loader import create_all_pipelines, compute_class_weights  # noqa: E402
+from src.data_loader import (  # noqa: E402
+    compute_class_weights,
+    compute_class_weights_trainval,
+    create_all_pipelines,
+    create_trainval_pipelines,
+)
 from src.evaluation import evaluate_model  # noqa: E402
 from src.models.baseline_cnn import build_baseline_cnn  # noqa: E402
 from src.models.residual_cnn import build_residual_cnn  # noqa: E402
@@ -44,7 +49,11 @@ from src.models.transfer_learning import (  # noqa: E402
     build_transfer_model,
     unfreeze_backbone,
 )
-from src.training import compile_model, train_model  # noqa: E402
+from src.training import (  # noqa: E402
+    build_cosine_lr_schedule,
+    compile_model,
+    train_model,
+)
 from src.utils import configure_gpu, plot_training_history, set_global_seed  # noqa: E402
 
 
@@ -109,6 +118,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip the final test-set evaluation.",
     )
+    parser.add_argument(
+        "--cosine",
+        action="store_true",
+        help="Use a cosine LR schedule (with warmup) instead of ReduceLROnPlateau.",
+    )
+    parser.add_argument(
+        "--head-units",
+        type=int,
+        default=0,
+        help="Hidden units in the classification head (0 = compact linear head).",
+    )
+    parser.add_argument(
+        "--train-on-trainval",
+        action="store_true",
+        help="Merge the official val split into training (2x data) and hold "
+        "out 10%% of the merged pool for monitoring. Test split stays untouched.",
+    )
     return parser.parse_args()
 
 
@@ -146,6 +172,7 @@ def build_model(args: argparse.Namespace, cfg: Config) -> keras.Model:
         backbone=args.backbone,
         freeze_backbone=not args.fine_tune,
         augment=not args.no_augment,
+        head_units=args.head_units,
     )
 
     if args.fine_tune:
@@ -182,8 +209,14 @@ def main() -> None:
     print("=" * 64 + "\n")
 
     # ── Data ────────────────────────────────────────────────────────
-    train_ds, val_ds, test_ds = create_all_pipelines(cfg, augment_train=False)
-    class_weight = None if args.no_class_weights else compute_class_weights(cfg)
+    if args.train_on_trainval:
+        train_ds, val_ds, test_ds = create_trainval_pipelines(cfg, val_fraction=0.1)
+        class_weight = (
+            None if args.no_class_weights else compute_class_weights_trainval(cfg, 0.1)
+        )
+    else:
+        train_ds, val_ds, test_ds = create_all_pipelines(cfg, augment_train=False)
+        class_weight = None if args.no_class_weights else compute_class_weights(cfg)
 
     # ── Model ───────────────────────────────────────────────────────
     model = build_model(args, cfg)
@@ -192,7 +225,18 @@ def main() -> None:
     lr = cfg.initial_lr
     if args.model == "transfer" and args.fine_tune:
         lr = min(lr, 1e-4)
-    compile_model(model, cfg, learning_rate=lr, label_smoothing=args.label_smoothing)
+
+    # Keep cfg in sync so the cosine schedule decays from the effective LR
+    cfg.initial_lr = lr
+
+    if args.cosine:
+        steps_per_epoch = int(tf.data.experimental.cardinality(train_ds).numpy())
+        schedule = build_cosine_lr_schedule(cfg, steps_per_epoch)
+        compile_model(
+            model, cfg, learning_rate=schedule, label_smoothing=args.label_smoothing
+        )
+    else:
+        compile_model(model, cfg, learning_rate=lr, label_smoothing=args.label_smoothing)
 
     experiment = args.experiment or f"{args.model}"
     if args.model == "transfer":
@@ -207,6 +251,8 @@ def main() -> None:
         cfg,
         experiment_name=experiment,
         class_weight=class_weight,
+        use_cosine_schedule=args.cosine,
+        label_smoothing=args.label_smoothing,
     )
 
     # ── Curves ──────────────────────────────────────────────────────
@@ -219,7 +265,15 @@ def main() -> None:
         print("  Test-set evaluation")
         print("=" * 64)
         best = exp_dir / "best_model.keras"
-        eval_model = keras.models.load_model(best) if best.exists() else model
+        if best.exists():
+            eval_model = keras.models.load_model(best, compile=False)
+            # A checkpoint loaded with compile=False has no optimizer/metrics,
+            # so it must be compiled before .evaluate() can run.
+            compile_model(
+                eval_model, cfg, learning_rate=lr, label_smoothing=args.label_smoothing
+            )
+        else:
+            eval_model = model
         evaluate_model(eval_model, test_ds)
 
     print(f"\nArtifacts saved to: {exp_dir}")

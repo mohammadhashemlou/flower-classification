@@ -75,6 +75,9 @@ def plot_confusion_matrix(
         save_path: Optional path to save the figure.
         normalize: If True, normalize rows to show percentages.
     """
+    import matplotlib
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from sklearn.metrics import confusion_matrix
 
@@ -93,11 +96,14 @@ def plot_confusion_matrix(
     ax.set_title("Confusion Matrix" + (" (Normalized)" if normalize else ""), fontsize=14)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    plt.tight_layout()
+    fig.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.show()
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Confusion matrix saved to: {save_path}")
+
+    plt.close(fig)
 
 
 def classification_report_csv(

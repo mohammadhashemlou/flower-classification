@@ -15,15 +15,41 @@ from typing import Optional, Dict
 from .config import Config
 
 
+class _NumericLrCallback(keras.callbacks.Callback):
+    """Record a numeric learning rate in the logs.
+
+    With a ``LearningRateSchedule`` the optimizer's ``learning_rate`` is a
+    callable, so ``logs['lr']`` ends up holding an object and CSVLogger
+    writes garbage. This callback resolves the schedule at the current step
+    so the CSV always contains a real number.
+    """
+
+    def on_epoch_end(self, epoch, logs=None):
+        if logs is None or "lr" not in logs:
+            return
+        lr = logs["lr"]
+        if isinstance(lr, (int, float)):
+            return
+
+        schedule = self.model.optimizer.learning_rate
+        step = self.model.optimizer.iterations
+        value = schedule(step) if callable(schedule) else schedule
+        logs["lr"] = float(keras.backend.get_value(value))
+
+
 def build_callbacks(
     cfg: Config,
     experiment_name: str,
+    use_schedule: bool = False,
 ) -> list:
     """Create the standard set of training callbacks.
 
     Args:
         cfg: Project configuration.
         experiment_name: Name used for the save directory.
+        use_schedule: Set True when the optimizer uses a LearningRateSchedule.
+            ``ReduceLROnPlateau`` cannot mutate a schedule (it expects a
+            mutable scalar LR), so it is omitted in that case.
 
     Returns:
         List of keras.callbacks.Callback instances.
@@ -39,23 +65,32 @@ def build_callbacks(
             verbose=1,
         ),
         keras.callbacks.EarlyStopping(
-            monitor="val_loss",
+            monitor="val_accuracy",
+            mode="max",
             patience=cfg.early_stopping_patience,
+            min_delta=1e-4,
             restore_best_weights=True,
             verbose=1,
         ),
-        keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss",
-            factor=cfg.reduce_lr_factor,
-            patience=cfg.reduce_lr_patience,
-            min_lr=cfg.min_lr,
-            verbose=1,
-        ),
+        # Runs before CSVLogger so the CSV records a float, not a schedule
+        _NumericLrCallback(),
         keras.callbacks.CSVLogger(
             filename=str(exp_dir / "history.csv"),
             append=False,
         ),
     ]
+
+    if not use_schedule:
+        callbacks.insert(
+            2,
+            keras.callbacks.ReduceLROnPlateau(
+                monitor="val_loss",
+                factor=cfg.reduce_lr_factor,
+                patience=cfg.reduce_lr_patience,
+                min_lr=cfg.min_lr,
+                verbose=1,
+            ),
+        )
 
     return callbacks
 
@@ -99,55 +134,60 @@ def build_cosine_lr_schedule(
         )
 
 
-def sparse_ce_with_label_smoothing(
-    num_classes: int,
-    smoothing: float = 0.1,
-):
+@keras.utils.register_keras_serializable(package="flower")
+class LabelSmoothingSparseCategoricalCrossentropy(keras.losses.Loss):
     """Sparse categorical cross-entropy with label smoothing.
 
-    Keras 2.10's built-in loss does not expose `label_smoothing`, so we
-    implement it explicitly. Smoothing prevents the model from becoming
-    overconfident, which measurably reduces overfitting on small datasets.
+    Keras 2.10's built-in ``SparseCategoricalCrossentropy`` has no
+    ``label_smoothing`` argument, so we implement it as a proper ``Loss``
+    subclass. Being a registered subclass (rather than a plain closure) means
+    it is serialized into ``.keras`` files and restored automatically — no
+    ``custom_objects`` needed when loading a checkpoint.
 
-    Args:
-        num_classes: Total number of classes.
-        smoothing: Smoothing factor in [0, 1). 0 disables smoothing.
-
-    Returns:
-        A loss function with signature (y_true, y_pred).
+    Smoothing stops the model from becoming overconfident, which measurably
+    reduces overfitting on small datasets such as Oxford Flowers 102.
     """
 
-    def loss_fn(y_true, y_pred):
+    def __init__(self, num_classes: int = 102, smoothing: float = 0.1, **kwargs):
+        super().__init__(**kwargs)
+        self.num_classes = int(num_classes)
+        self.smoothing = float(smoothing)
+
+    def call(self, y_true, y_pred):
         y_true = tf.cast(tf.reshape(y_true, [-1]), tf.int32)
         y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0)
 
-        y_one_hot = tf.one_hot(y_true, num_classes)
-        y_smooth = y_one_hot * (1.0 - smoothing) + smoothing / num_classes
+        y_one_hot = tf.one_hot(y_true, self.num_classes)
+        y_smooth = y_one_hot * (1.0 - self.smoothing) + self.smoothing / self.num_classes
 
         return tf.reduce_mean(
             -tf.reduce_sum(y_smooth * tf.math.log(y_pred), axis=-1)
         )
 
-    loss_fn.__name__ = f"sparse_ce_smooth_{smoothing}"
-    return loss_fn
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "num_classes": self.num_classes,
+                "smoothing": self.smoothing,
+            }
+        )
+        return config
 
 
 def _build_loss(cfg: Config, label_smoothing: float):
-    """Return a sparse categorical cross-entropy loss.
+    """Return the sparse categorical cross-entropy loss to use.
 
-    Prefers Keras' built-in loss (which supports `label_smoothing` in
-    Keras 3 and later). Falls back to a hand-rolled implementation on
-    older Keras versions where the keyword does not exist.
+    Uses the registered smoothing loss when smoothing is requested, so the
+    resulting checkpoint stays loadable without custom objects.
     """
     if label_smoothing <= 0:
         return keras.losses.SparseCategoricalCrossentropy()
 
-    try:
-        return keras.losses.SparseCategoricalCrossentropy(
-            label_smoothing=label_smoothing
-        )
-    except TypeError:
-        return sparse_ce_with_label_smoothing(cfg.num_classes, label_smoothing)
+    return LabelSmoothingSparseCategoricalCrossentropy(
+        num_classes=cfg.num_classes,
+        smoothing=label_smoothing,
+    )
 
 
 def compile_model(
@@ -210,7 +250,7 @@ def train_model(
         else:
             compile_model(model, cfg, label_smoothing=label_smoothing)
 
-    callbacks = build_callbacks(cfg, experiment_name)
+    callbacks = build_callbacks(cfg, experiment_name, use_schedule=use_cosine_schedule)
 
     print(f"\n{'=' * 60}")
     print(f"  Training: {experiment_name}")
