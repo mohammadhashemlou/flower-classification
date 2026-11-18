@@ -7,7 +7,8 @@
 [![Python](https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.10-FF6F00?style=flat-square&logo=tensorflow&logoColor=white)](https://tensorflow.org/)
 [![License](https://img.shields.io/badge/License-MIT-3DA639?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-16%20passing-2ea44f?style=flat-square)](tests/)
+[![CI](https://github.com/mohammadhashemlou/flower-classification/actions/workflows/ci.yml/badge.svg)](https://github.com/mohammadhashemlou/flower-classification/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/pytest-16%20tests-2ea44f?style=flat-square)](tests/)
 
 *Six reproducible experiments, one honest benchmark: **88.66% top-1 / 97.07% top-5** on the official test split.*
 

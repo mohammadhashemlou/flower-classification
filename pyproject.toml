@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flower-classification"
+version = "0.1.0"
+description = "Fine-grained recognition of 102 flower species (Oxford Flowers 102)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# ─── Ruff ───────────────────────────────────────────────────────────────
+# Scope is deliberately narrow: catch real defects (undefined names, unused
+# imports, syntax-level issues) without turning the CI into a style debate.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# setup_cuda_dlls() must run before `import tensorflow`, so these modules
+# legitimately import after executable statements.
+"scripts/*.py" = ["E402"]
+"tests/*.py" = ["E402"]
+# Notebook content is stored as long literal strings; wrapping them would
+# change the generated cells.
+"scripts/generate_notebooks.py" = ["E402", "E501"]
+
+# ─── Pytest ─────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]

@@ -43,7 +43,7 @@ def test_residual_builds_with_and_without_augmentation(cfg):
     assert plain.output_shape == (None, cfg.num_classes)
     assert augmented.count_params() == plain.count_params()
     # Augmentation layers carry no weights, so only the graph differs
-    assert any(l.name == "data_augmentation" for l in augmented.layers)
+    assert any(layer.name == "data_augmentation" for layer in augmented.layers)
 
 
 def test_transfer_compact_head_is_smaller(cfg):

@@ -29,7 +29,7 @@ jobs:
                       scikit-learn pytest ruff
 
       - name: Lint with ruff
-        run: ruff check src scripts tests --output-format=github || true
+        run: ruff check src scripts tests --output-format=github
 
       - name: Compile-check all modules
         run: python -m compileall -q src scripts tests

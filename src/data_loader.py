@@ -11,7 +11,6 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers  # type: ignore
 
-from pathlib import Path
 from typing import Tuple
 
 from .config import Config
@@ -110,6 +109,8 @@ def build_augmentation_layer(img_height: int = 224, img_width: int = 224) -> ker
 
 # ── Pipeline builder ────────────────────────────────────────────────
 
+VALID_SPLITS = ("train", "val", "test")
+
 
 def create_data_pipeline(
     cfg: Config,
@@ -140,17 +141,23 @@ def create_data_pipeline(
 
     Returns:
         A batched, prefetched tf.data.Dataset yielding (images, labels).
-    """
-    labels, train_ids, valid_ids, test_ids = load_oxford_flowers_metadata(cfg.dataset_dir)
 
-    if split == "train":
-        ids = train_ids
-    elif split == "val":
-        ids = valid_ids
-    elif split == "test":
-        ids = test_ids
-    else:
-        raise ValueError(f"Unknown split: {split!r}. Use 'train', 'val', or 'test'.")
+    Raises:
+        ValueError: If ``split`` is not one of "train", "val", "test".
+            This is checked *before* touching the dataset on disk, so a typo
+            fails with a clear message instead of a confusing file error.
+    """
+    if split not in VALID_SPLITS:
+        raise ValueError(
+            f"Unknown split: {split!r}. Use one of: {', '.join(VALID_SPLITS)}."
+        )
+
+    labels, train_ids, valid_ids, test_ids = load_oxford_flowers_metadata(cfg.dataset_dir)
+    ids = {
+        "train": train_ids,
+        "val": valid_ids,
+        "test": test_ids,
+    }[split]
 
     return _build_pipeline_from_ids(
         cfg,
@@ -220,7 +227,7 @@ def _build_pipeline_from_ids(
     dataset = tf.data.Dataset.from_tensor_slices((paths, y))
 
     dataset = dataset.map(
-        lambda p, l: decode_image_uint8(p, l, cfg.img_height, cfg.img_width),
+        lambda path, label: decode_image_uint8(path, label, cfg.img_height, cfg.img_width),
         num_parallel_calls=tf.data.AUTOTUNE,
     )
 

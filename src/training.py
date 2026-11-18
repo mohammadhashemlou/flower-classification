@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import tensorflow as tf
 from tensorflow import keras
-from pathlib import Path
 from typing import Optional, Dict
 
 from .config import Config
